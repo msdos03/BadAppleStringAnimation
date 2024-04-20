@@ -4,6 +4,8 @@
 #include <string.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include <time.h>
+#include <signal.h>
 
 #ifndef PATH
 #define PATH "badapple.txt"
@@ -33,32 +35,45 @@
 
 //    declare the function after main() to avoid warning
 int get_framesize(int fd);
+void draw(int sig);
+
+int fd;
+int framesize;
+char* framebuf;
+timer_t timer;
 
 int main(int argc, char const *argv[])
 {
-	size_t delay = 50000;
-	int fd;
-	int framesize;
-	int i;
+	struct timespec delay = {
+		.tv_sec = 0,
+		.tv_nsec = 126084441,
+	};
 
-	for(i = 1; i < argc; i++) {
+	for(int i = 1; i < argc; i++) {
 		if(EQUALS(argv[i], "-d"))
-			delay = strtol(argv[++i], NULL, 0);
+			delay.tv_nsec = strtol(argv[++i], NULL, 0);
 		else if(EQUALS(argv[i], "-h") || EQUALS(argv[i], "--help")) {
 			printf(
 			"badapple\n"
 			"\n"
-			"Usage:\tbadapple <-d delay in us> <-h,--help>\n"
+			"Usage:\tbadapple <-d delay in ns> <-h,--help>\n"
 			"\n"
 			"-h,--help\tShow this help page\n"
 			"\n"
-			"-d\t\tSet delay between frames, default: 50000us\n"
+			"-d\t\tSet delay between frames, default: 126084441ns\n"
 			"\n"
 			"Author: kisekied <https://github.com/kisekied>\n"
 			);
 			exit(EXIT_FAILURE);
 		}
 	}
+
+	struct sigaction sigact = {
+		.sa_handler = draw,
+		.sa_flags = 0,
+	};
+	sigemptyset(&sigact.sa_mask);
+	sigaction(SIGUSR1, &sigact, NULL);
 
 	fd = open(PATH, O_RDONLY);
 	if(fd < 0) {
@@ -72,19 +87,51 @@ int main(int argc, char const *argv[])
 		return EXIT_FAILURE;
 	}
 
-	char* framebuf = malloc(framesize + 6);    //    6 is the length of "\033[0;0H"
+//6 is the length of "\033[0;0H"
+	framebuf = malloc(framesize + 6);
 	strcpy(framebuf, "\033[0;0H");
 
-	while(read(fd, framebuf + 6, framesize - TAIL_CUT) > 0) {
-		write(STDOUT_FILENO, framebuf, framesize + 6 - TAIL_CUT);    //    write a frame to stdout
-		lseek(fd, strlen(DELIM) + TAIL_CUT + OVER_SEEK, SEEK_CUR);
-		usleep(delay);
-	}
+	struct sigevent sev = {
+		.sigev_notify = SIGEV_SIGNAL,
+		.sigev_signo = SIGUSR1,
+	};
+	timer_create(CLOCK_MONOTONIC, &sev, &timer);
+	struct itimerspec its = {
+		.it_interval = delay,
+		.it_value = delay,
+	};
+	timer_settime(timer, 0, &its, NULL);
 
-	free(framebuf);
-	close(fd);
-	return EXIT_SUCCESS;
+	while (1) {
+		sleep(1);
+	}
 }
+
+void draw(int sig)
+{
+	if (read(fd, framebuf + 6, framesize - TAIL_CUT) <= 0) {
+		struct itimerspec its = {
+			.it_interval = {
+				.tv_sec = 0,
+				.tv_nsec = 0,
+			},
+			.it_value = {
+				.tv_sec = 0,
+				.tv_nsec = 0,
+			},
+		};
+		timer_settime(timer, 0, &its, NULL);
+		printf("\n");
+		free(framebuf);
+		close(fd);
+		exit(0);
+	}
+//write a frame to stdout
+	write(STDOUT_FILENO, framebuf, framesize + 6 - TAIL_CUT);
+	lseek(fd, strlen(DELIM) + TAIL_CUT + OVER_SEEK, SEEK_CUR);
+	return;
+}
+
 
 /*
 	This function is for getting the size of a frame, not including DELIM itself
