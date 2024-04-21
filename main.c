@@ -50,9 +50,13 @@ int main(int argc, char const *argv[])
 	};
 
 	for(int i = 1; i < argc; i++) {
-		if(EQUALS(argv[i], "-d"))
+		if(EQUALS(argv[i], "-d")) {
 			delay.tv_nsec = strtol(argv[++i], NULL, 0);
-		else if(EQUALS(argv[i], "-h") || EQUALS(argv[i], "--help")) {
+			if (!delay.tv_nsec) {
+				printf("error: delay should not be 0\n");
+				exit(EXIT_FAILURE);
+			}
+		} else if(EQUALS(argv[i], "-h") || EQUALS(argv[i], "--help")) {
 			printf(
 			"badapple\n"
 			"\n"
@@ -89,7 +93,7 @@ int main(int argc, char const *argv[])
 
 //6 is the length of "\033[0;0H"
 	framebuf = malloc(framesize + 6);
-	strcpy(framebuf, "\033[0;0H");
+	memcpy(framebuf, "\033[0;0H", 6);
 
 	struct sigevent sev = {
 		.sigev_notify = SIGEV_SIGNAL,
@@ -110,17 +114,7 @@ int main(int argc, char const *argv[])
 void draw(int sig)
 {
 	if (read(fd, framebuf + 6, framesize - TAIL_CUT) <= 0) {
-		struct itimerspec its = {
-			.it_interval = {
-				.tv_sec = 0,
-				.tv_nsec = 0,
-			},
-			.it_value = {
-				.tv_sec = 0,
-				.tv_nsec = 0,
-			},
-		};
-		timer_settime(timer, 0, &its, NULL);
+		timer_delete(timer);
 		printf("\n");
 		free(framebuf);
 		close(fd);
